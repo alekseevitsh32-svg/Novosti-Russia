@@ -5,50 +5,69 @@ const parser = new Parser({
   headers: { "User-Agent": "Mozilla/5.0 NewsBot/1.0" },
 });
 
-const SOURCES = {
+// Общий пул RSS — из него фильтруем по ключевым словам
+const POOL = [
+  { url: "https://ria.ru/export/rss2/archive/index.xml", name: "РИА Новости" },
+  { url: "https://tass.ru/rss/v2.xml", name: "ТАСС" },
+  { url: "https://lenta.ru/rss/news", name: "Лента.ру" },
+  { url: "https://www.sports.ru/rss/all_news.xml", name: "Sports.ru" },
+  { url: "https://rsport.ria.ru/export/rss2/archive/index.xml", name: "РИА Спорт" },
+  { url: "https://stopgame.ru/rss/rss_news.xml", name: "StopGame" },
+  { url: "https://dtf.ru/rss/games", name: "DTF" },
+  { url: "https://nplus1.ru/rss", name: "N+1" },
+  { url: "https://habr.com/ru/rss/news/", name: "Хабр" },
+  { url: "https://tjournal.ru/rss", name: "TJ" },
+  { url: "https://motor.ru/rss/all.xml", name: "Motor.ru" },
+  { url: "https://www.film.ru/rss/news", name: "Film.ru" },
+];
+
+// Ключевые слова для каждой вкладки
+// Если массив пустой — берём всё (для "Все" и "Главные")
+const FILTERS = {
+  all: [],
   main: [
-    "https://ria.ru/export/rss2/archive/index.xml",
-    "https://tass.ru/rss/v2.xml",
-    "https://lenta.ru/rss/news",
+    "путин", "кремль", "госдума", "правительство", "украин",
+    "спецоперац", "сво", "россия", "минобороны", "лавров",
+    "санкц", "закон", "президент", "премьер",
   ],
   war: [
-    "https://ria.ru/export/rss2/archive/index.xml",
-    "https://tass.ru/rss/v2.xml",
-    "https://rg.ru/xml/index.xml",
+    "украин", "сво", "спецоперац", "минобороны", "фронт",
+    "всу", "дрон", "бпла", "обстрел", "штурм", "наступлен",
+    "мобилизац", "военн", "боец", "артиллер", "ракет",
+    "курск", "донецк", "луганск", "запорож", "херсон", "белгород",
   ],
   sport: [
-    "https://www.sports.ru/rss/all_news.xml",
-    "https://rsport.ria.ru/export/rss2/archive/index.xml",
+    "футбол", "матч", "олимпиад", "чемпионат", "гол",
+    "хокке", "теннис", "бокс", "спорт", "тренер", "команд",
+    "рпл", "кубок", "турнир", "атлет", "биатлон", "фигурн",
   ],
   games: [
-    "https://stopgame.ru/rss/rss_news.xml",
-    "https://dtf.ru/rss/games",
+    "игр", "игров", "релиз", "steam", "playstation", "xbox",
+    "nintendo", "геймер", "гейминг", "геймплей", "мод",
+    "киберспорт", "разработчик", "студи", "гта", "gta",
+    "dota", "cs2", "counter-strike", "minecraft", "roblox",
   ],
   science: [
-    "https://nplus1.ru/rss",
-    "https://ria.ru/export/rss2/archive/index.xml",
+    "наук", "исследован", "учён", "учен", "открыт", "эксперимент",
+    "космос", "nasa", "роскосмос", "марс", "луна", "телескоп",
+    "археолог", "динозавр", "днк", "физик", "химик", "биолог",
+    "климат", "экспедиц",
   ],
   tech: [
-    "https://habr.com/ru/rss/news/",
-    "https://tjournal.ru/rss",
+    "технолог", "смартфон", "iphone", "android", "google",
+    "apple", "яндекс", "нейросет", "ии ", " ai ", "искусственн",
+    "чип", "процессор", "гаджет", "интернет", "приложен",
+    "софт", "программ", "разработ", "хакер", "утечк",
   ],
   auto: [
-    "https://www.zr.ru/rss/feed/",
-    "https://motor.ru/rss/all.xml",
+    "авто", "машин", "автомобил", "lada", "лада", "автоваз",
+    "tesla", "электромобил", "двигател", "бензин", "шин",
+    "дтп", "водител", "гибдд", "дорог", "кроссовер", "седан",
   ],
   cinema: [
-    "https://www.kinopoisk.ru/rss/news/",
-    "https://www.film.ru/rss/news",
-  ],
-  all: [
-    "https://ria.ru/export/rss2/archive/index.xml",
-    "https://tass.ru/rss/v2.xml",
-    "https://lenta.ru/rss/news",
-    "https://www.sports.ru/rss/all_news.xml",
-    "https://stopgame.ru/rss/rss_news.xml",
-    "https://nplus1.ru/rss",
-    "https://habr.com/ru/rss/news/",
-    "https://motor.ru/rss/all.xml",
+    "фильм", "кино", "сериал", "актёр", "актер", "режиссёр",
+    "режиссер", "премьер", "трейлер", "оскар", "нетфликс",
+    "netflix", "боевик", "комеди", "драм", "прокат",
   ],
 };
 
@@ -91,42 +110,60 @@ function extractImage(item) {
   return null;
 }
 
-async function fetchRss(url) {
-  const feed = await parser.parseURL(url);
-  return (feed.items || []).slice(0, 15).map((item) => ({
-    title: item.title || "Без заголовка",
-    link: item.link || "#",
-    description: cleanText(
-      item.contentSnippet || item.summary || item.content || ""
-    ),
-    image: extractImage(item),
-    date: item.pubDate || item.isoDate || "",
-    source: feed.title || new URL(url).hostname,
-  }));
+async function fetchFeed(source) {
+  try {
+    const feed = await parser.parseURL(source.url);
+    return (feed.items || []).slice(0, 30).map((item) => ({
+      title: item.title || "Без заголовка",
+      link: item.link || "#",
+      description: cleanText(
+        item.contentSnippet || item.summary || item.content || ""
+      ),
+      image: extractImage(item),
+      date: item.pubDate || item.isoDate || "",
+      source: source.name,
+    }));
+  } catch (e) {
+    console.error(`Упал ${source.name}:`, e.message);
+    return [];
+  }
+}
+
+function matches(text, keywords) {
+  if (!keywords.length) return true;
+  const lower = text.toLowerCase();
+  return keywords.some((k) => lower.includes(k));
 }
 
 export default async function handler(req, res) {
-  const category = (req.query.category || "main").toString();
-  const feeds = SOURCES[category] || SOURCES.main;
+  const category = (req.query.category || "all").toString();
+  const keywords = FILTERS[category] ?? [];
 
   try {
-    const results = await Promise.allSettled(feeds.map((u) => fetchRss(u)));
+    // Параллельно тянем всё, что есть
+    const results = await Promise.all(POOL.map((s) => fetchFeed(s)));
 
     let news = [];
-    for (const r of results) {
-      if (r.status === "fulfilled") news = news.concat(r.value);
-      else console.error("Источник упал:", r.reason?.message || r.reason);
-    }
+    for (const arr of results) news = news.concat(arr);
 
+    // Сортировка
     news.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
+    // Дедупликация ДО фильтрации
     const seen = new Set();
     news = news.filter((n) => {
-      const key = n.title.toLowerCase();
+      const key = n.title.toLowerCase().slice(0, 60);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
+
+    // Фильтр по ключевым словам (для "Все Новости" — без фильтра)
+    if (category !== "all") {
+      news = news.filter((n) =>
+        matches(n.title + " " + n.description, keywords)
+      );
+    }
 
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
     res
