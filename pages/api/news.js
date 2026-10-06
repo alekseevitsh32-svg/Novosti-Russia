@@ -1,5 +1,4 @@
 import Parser from "rss-parser";
-import * as cheerio from "cheerio";
 
 const parser = new Parser({
   timeout: 10000,
@@ -12,6 +11,11 @@ const SOURCES = {
     "https://tass.ru/rss/v2.xml",
     "https://lenta.ru/rss/news",
   ],
+  war: [
+    "https://ria.ru/export/rss2/archive/index.xml",
+    "https://tass.ru/rss/v2.xml",
+    "https://rg.ru/xml/index.xml",
+  ],
   sport: [
     "https://www.sports.ru/rss/all_news.xml",
     "https://rsport.ria.ru/export/rss2/archive/index.xml",
@@ -20,8 +24,21 @@ const SOURCES = {
     "https://stopgame.ru/rss/rss_news.xml",
     "https://dtf.ru/rss/games",
   ],
-  food: [
+  science: [
+    "https://nplus1.ru/rss",
     "https://ria.ru/export/rss2/archive/index.xml",
+  ],
+  tech: [
+    "https://habr.com/ru/rss/news/",
+    "https://tjournal.ru/rss",
+  ],
+  auto: [
+    "https://www.zr.ru/rss/feed/",
+    "https://motor.ru/rss/all.xml",
+  ],
+  cinema: [
+    "https://www.kinopoisk.ru/rss/news/",
+    "https://www.film.ru/rss/news",
   ],
   all: [
     "https://ria.ru/export/rss2/archive/index.xml",
@@ -29,6 +46,9 @@ const SOURCES = {
     "https://lenta.ru/rss/news",
     "https://www.sports.ru/rss/all_news.xml",
     "https://stopgame.ru/rss/rss_news.xml",
+    "https://nplus1.ru/rss",
+    "https://habr.com/ru/rss/news/",
+    "https://motor.ru/rss/all.xml",
   ],
 };
 
@@ -46,6 +66,31 @@ function cleanText(html) {
     .slice(0, 200);
 }
 
+function extractImage(item) {
+  if (item.enclosure?.url) return item.enclosure.url;
+
+  const media = item["media:content"] || item.mediaContent;
+  if (media) {
+    if (Array.isArray(media) && media[0]?.$?.url) return media[0].$.url;
+    if (media.$?.url) return media.$.url;
+  }
+
+  const thumb = item["media:thumbnail"];
+  if (thumb?.$?.url) return thumb.$.url;
+  if (Array.isArray(thumb) && thumb[0]?.$?.url) return thumb[0].$.url;
+
+  const html =
+    item["content:encoded"] ||
+    item.content ||
+    item.description ||
+    item.summary ||
+    "";
+  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  if (match && match[1]) return match[1];
+
+  return null;
+}
+
 async function fetchRss(url) {
   const feed = await parser.parseURL(url);
   return (feed.items || []).slice(0, 15).map((item) => ({
@@ -54,119 +99,23 @@ async function fetchRss(url) {
     description: cleanText(
       item.contentSnippet || item.summary || item.content || ""
     ),
+    image: extractImage(item),
     date: item.pubDate || item.isoDate || "",
     source: feed.title || new URL(url).hostname,
   }));
 }
-
-// ===== HTML-парсер для еды =====
-
-async function fetchHtml(url, selectorFn, sourceName) {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-      "Accept-Language": "ru-RU,ru;q=0.9",
-    },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  const html = await res.text();
-  const $ = cheerio.load(html);
-  return selectorFn($, url, sourceName);
-}
-
-async function parseGastronom() {
-  return fetchHtml(
-    "https://www.gastronom.ru/",
-    ($, baseUrl, source) => {
-      const items = [];
-      $("a").each((_, el) => {
-        if (items.length >= 20) return;
-        const href = $(el).attr("href");
-        const text = $(el).text().trim();
-        if (
-          href &&
-          text.length > 25 &&
-          text.length < 150 &&
-          /\/recipe\/|\/news\/|\/article\//.test(href)
-        ) {
-          const full = href.startsWith("http")
-            ? href
-            : "https://www.gastronom.ru" + href;
-          if (!items.find((i) => i.link === full)) {
-            items.push({
-              title: text,
-              link: full,
-              description: "",
-              date: new Date().toISOString(),
-              source,
-            });
-          }
-        }
-      });
-      return items;
-    },
-    "Гастрономъ"
-  );
-}
-
-async function parseEda() {
-  return fetchHtml(
-    "https://eda.ru/",
-    ($, baseUrl, source) => {
-      const items = [];
-      $("a").each((_, el) => {
-        if (items.length >= 20) return;
-        const href = $(el).attr("href");
-        const text = $(el).text().trim();
-        if (
-          href &&
-          text.length > 25 &&
-          text.length < 150 &&
-          /\/recipes\/|\/media\//.test(href)
-        ) {
-          const full = href.startsWith("http")
-            ? href
-            : "https://eda.ru" + href;
-          if (!items.find((i) => i.link === full)) {
-            items.push({
-              title: text,
-              link: full,
-              description: "",
-              date: new Date().toISOString(),
-              source,
-            });
-          }
-        }
-      });
-      return items;
-    },
-    "Eda.ru"
-  );
-}
-
-// ================================
 
 export default async function handler(req, res) {
   const category = (req.query.category || "main").toString();
   const feeds = SOURCES[category] || SOURCES.main;
 
   try {
-    let tasks = feeds.map((url) => fetchRss(url));
-
-    if (category === "food") {
-      tasks.push(parseGastronom(), parseEda());
-    }
-
-    const results = await Promise.allSettled(tasks);
+    const results = await Promise.allSettled(feeds.map((u) => fetchRss(u)));
 
     let news = [];
     for (const r of results) {
-      if (r.status === "fulfilled" && Array.isArray(r.value)) {
-        news = news.concat(r.value);
-      } else if (r.status === "rejected") {
-        console.error("Источник упал:", r.reason?.message || r.reason);
-      }
+      if (r.status === "fulfilled") news = news.concat(r.value);
+      else console.error("Источник упал:", r.reason?.message || r.reason);
     }
 
     news.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
