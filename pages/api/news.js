@@ -21,8 +21,10 @@ const SOURCES = {
     "https://dtf.ru/rss/games",
   ],
   food: [
-    "https://www.gastronom.ru/rss.xml",
-    "https://eda.ru/rss",
+  "https://www.the-village.ru/section/food.rss",
+  "https://tass.ru/rss/v2.xml?section=food",
+  "https://lenta.ru/rss/news/food",
+  "https://ria.ru/export/rss2/archive/index.xml",
   ],
   all: [
     "https://ria.ru/export/rss2/archive/index.xml",
